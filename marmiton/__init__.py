@@ -6,6 +6,7 @@ import urllib.parse
 import urllib.request
 
 import re
+import json
 
 
 class RecipeNotFound(Exception):
@@ -38,16 +39,16 @@ class Marmiton(object):
 
 		search_data = []
 
-		articles = soup.findAll("div", {"class": "recipe-card"})
+		articles = soup.find_all("a", href=re.compile("^\/recettes\/recette_"))
 
 		iterarticles = iter(articles)
 		for article in iterarticles:
 			data = {}
 			try:
-				data["name"] = article.find("h4", {"class": "recipe-card__title"}).get_text().strip(' \t\n\r')
-				data["description"] = article.find("div", {"class": "recipe-card__description"}).get_text().strip(' \t\n\r')
-				data["url"] = article.find("a", {"class": "recipe-card-link"})['href']
-				data["rate"] = article.find("span", {"class": "recipe-card__rating__value"}).text.strip(' \t\n\r')
+				data["name"] = article.find("h4").get_text().strip(' \t\n\r')
+				data["description"] = ""
+				data["url"] = article['href']
+				data["rate"] = article.find("span").text.strip(' \t\n\r')
 				try:
 					data["image"] = article.find('img')['src']
 				except Exception as e1:
@@ -71,7 +72,7 @@ class Marmiton(object):
 		"""
 		data = {}
 
-		base_url = "http://www.marmiton.org"
+		base_url = "https://www.marmiton.org"
 		url = base_url + ("" if uri.startswith("/") else "/") + uri
 
 		try:
@@ -82,59 +83,37 @@ class Marmiton(object):
 		soup = BeautifulSoup(html_content, 'html.parser')
 
 		main_data = soup.find("div", {"class": "m_content_recette_main"})
-		try:
-			name = soup.find("h1", {"class", "main-title "}).get_text().strip(' \t\n\r')
-		except:
-			name = soup.find("h1", {"class", "main-title"}).get_text().strip(' \t\n\r')
+		d = json.loads(soup.find('script', type='application/json').string)
+		recipe = d['props']['pageProps']['recipeData']['recipe']
+		
+		tmp_ingredients = recipe['ingredientGroups'][0]['items']
+		keys = ['name', 'unitName', 'ingredientQuantity']
+		ingredients = []
+		for ing in tmp_ingredients:
+			ingredient = { k: ing[k] for k in keys }
+			ingredients.append(ingredient)
 
-		ingredients = [item.text.replace("\n", "").strip() for item in soup.find_all("li", {"class": "recipe-ingredients__list__item"})]
-
-		try:
-			tags = list(set([item.text.replace("\n", "").strip() for item in soup.find('ul', {"class": "mrtn-tags-list"}).find_all('li', {"class": "mrtn-tag"})]))
-		except:
-			tags = []
-
-		recipe_elements = [
-			{"name": "author", "query": soup.find('span', {"class": "recipe-author__name"})},
-			{"name": "rate","query": soup.find("span", {"class": "recipe-reviews-list__review__head__infos__rating__value"})},
-			{"name": "difficulty", "query": soup.find("div", {"class": "recipe-infos__level"})},
-			{"name": "budget", "query": soup.find("div", {"class": "recipe-infos__budget"})},
-			{"name": "prep_time", "query": soup.find("span", {"class": "recipe-infos__timmings__value"})},
-			{"name": "total_time", "query": soup.find("span", {"class": "title-2 recipe-infos__total-time__value"})},
-			{"name": "people_quantity", "query": soup.find("span", {"class": "title-2 recipe-infos__quantity__value"})},
-			{"name": "author_tip", "query": soup.find("div", {"class": "recipe-chief-tip mrtn-recipe-bloc "}).find("p", {"class": "mrtn-recipe-bloc__content"}) if soup.find("div", {"class": "recipe-chief-tip mrtn-recipe-bloc "}) else "" },
-		]
-		for recipe_element in recipe_elements:
-			try:
-				data[recipe_element['name']] = Marmiton.__clean_text(recipe_element['query'])
-			except:
-				data[recipe_element['name']] = ""
-
-		try:
-			cook_time = Marmiton.__clean_text(soup.find("div", {"class": "recipe-infos__timmings__cooking"}).find("span"))
-		except:
-			cook_time = "0"
-
-		try:
-			nb_comments = Marmiton.__clean_text(soup.find("span", {"class": "recipe-infos-users__value mrtn-hide-on-print"})).split(" ")[0]
-		except:
-			nb_comments = ""
-
+		tmp_steps = recipe['steps']
 		steps = []
-		soup_steps = soup.find_all("li", {"class": "recipe-preparation__list__item"})
-		for soup_step in soup_steps:
-			steps.append(Marmiton.__clean_text(soup_step))
+		for step in tmp_steps:
+			steps.append(step['text'])
 
-		image = soup.find("img", {"id": "af-diapo-desktop-0_img"})['src'] if soup.find("img", {"id": "af-diapo-desktop-0_img"}) else ""
+		tags = []
+		for t in recipe['categories']:
+			tags.append(t['name'])
+
+		images = []
+		for t in recipe['picturesPreview']:
+			images.append(t['pictureUrls']['main'])
 
 		data.update({
 			"ingredients": ingredients,
 			"steps": steps,
-			"name": name,
+			"name": recipe['title'],
 			"tags": tags,
-			"image": image if image else "",
-			"nb_comments": nb_comments,
-			"cook_time": cook_time
+			"images": images,
+			"cook_time": recipe['cookingTime'],
+			"preparation_time": recipe['preparationTime']
 		})
 
 		return data
